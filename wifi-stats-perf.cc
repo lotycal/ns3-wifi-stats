@@ -14,7 +14,6 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * Author: Szymon Szott <szott@agh.edu.pl>
  * Based on he-wifi-network.cc by S. Deronne <sebastien.deronne@gmail.com>
@@ -651,8 +650,11 @@ int main(int argc, char *argv[])
   YansWifiPhyHelper phy;
   phy.SetChannel(channel.Create());
 
+    // === PHY configuration ===
+  phy.Set("ChannelSettings", StringValue("{36, 20, BAND_5GHZ, 0}"));
+
   // === General Wi-Fi configuration ===
-  Config::SetDefault("ns3::WifiRemoteStationManager::RtsCtsThreshold", UintegerValue(2200));
+  Config::SetDefault("ns3::WifiRemoteStationManager::RtsCtsThreshold", UintegerValue(2200000));
 
   WifiHelper wifi;
   wifi.SetStandard(WIFI_STANDARD_80211ax); // <-- HE (High Efficiency, czyli 802.11ax)
@@ -668,15 +670,15 @@ int main(int argc, char *argv[])
   NetDeviceContainer staDevices = wifi.Install(phy, mac, wifiStaNodes);
 
   // === Disable A-MPDU aggregation (matching pcoll.cc behavior) ===
-  for (uint32_t index = 0; index < staDevices.GetN(); ++index)
-  {
-      Ptr<NetDevice> dev = staDevices.Get(index);
-      Ptr<WifiNetDevice> wifiDev = DynamicCast<WifiNetDevice>(dev);
-      if (wifiDev)
-      {
-          wifiDev->GetMac()->SetAttribute("BE_MaxAmpduSize", UintegerValue(0));
-      }
-  }
+  // for (uint32_t index = 0; index < staDevices.GetN(); ++index)
+  // {
+  //     Ptr<NetDevice> dev = staDevices.Get(index);
+  //     Ptr<WifiNetDevice> wifiDev = DynamicCast<WifiNetDevice>(dev);
+  //     if (wifiDev)
+  //     {
+  //         wifiDev->GetMac()->SetAttribute("BE_MaxAmpduSize", UintegerValue(0));
+  //     }
+  // }
 
   // === AP (access point) ===
   mac.SetType("ns3::ApWifiMac",
@@ -693,9 +695,6 @@ int main(int argc, char *argv[])
 
   WifiStaticSetupHelper::SetStaticAssociation(apDev, staDevices);
   WifiStaticSetupHelper::SetStaticBlockAck(apDev, staDevices, {0});
-
-  // === PHY configuration ===
-  phy.Set("ChannelSettings", StringValue("{36, 20, BAND_5GHZ, 0}"));
 
   // === TX stats helper ===
   WifiTxStatsHelper txStats;
