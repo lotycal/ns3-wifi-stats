@@ -74,6 +74,10 @@ static uint64_t gPsduFailures  = 0;
 
 static std::map<uint64_t, Time> gTxTimestampPerSeq;
 static std::vector<double> gDelays;
+// channel-access delays: key = transmitter MAC address
+static std::map<Mac48Address, Time> gLastRxTime;
+static std::vector<double> gChannelAccessDelays;
+
 
 static void PhyRxEndHandler(std::string /*context*/, Ptr<const Packet> /*p*/)
 {
@@ -94,6 +98,28 @@ static void TxTrace(std::string context, Ptr<const Packet> packet)
 
 static void RxTrace(std::string context, Ptr<const Packet> packet)
 {
+    // --- extracting sender address ---
+    WifiMacHeader hdr;
+    Ptr<Packet> copy = packet->Copy();
+    copy->PeekHeader(hdr);
+
+    if (hdr.IsData())  // only DATA frames
+    {
+        Mac48Address addr = hdr.GetAddr2();   // transmitter MAC address
+        Time now = Simulator::Now();
+
+        // compute channel-access delay
+        if (gLastRxTime.find(addr) != gLastRxTime.end())
+        {
+            double delta = (now - gLastRxTime[addr]).GetSeconds();
+            gChannelAccessDelays.push_back(delta);
+        }
+
+        // update last timestamp for this sender
+        gLastRxTime[addr] = now;
+    }
+
+    // --- original delay measurement using UID ---
     uint64_t id = packet->GetUid();
     auto it = gTxTimestampPerSeq.find(id);
 
@@ -104,6 +130,7 @@ static void RxTrace(std::string context, Ptr<const Packet> packet)
         gTxTimestampPerSeq.erase(it);
     }
 }
+
 
 
 int main(int argc, char *argv[])
@@ -274,7 +301,7 @@ int main(int argc, char *argv[])
 
   if (totalPsdus > 0) {
     pSucc = static_cast<double>(gPsduSuccesses) / static_cast<double>(totalPsdus);
-    pColl = static_cast<double>(gPsduFailures)  / static_cast<double>(totalPsdus); // <-- jak wcześniej
+    pColl = static_cast<double>(gPsduFailures)  / static_cast<double>(totalPsdus);
   }
 
   std::cout << std::fixed << std::setprecision(4);
@@ -307,8 +334,19 @@ int main(int argc, char *argv[])
   }
   cdf.close();
 
+  std::ofstream ch("channel_access_delays.csv");
+    ch << "delay_s,cdf\n";
 
+    std::vector<double> sortedCAD = gChannelAccessDelays;
+    std::sort(sortedCAD.begin(), sortedCAD.end());
+    size_t M = sortedCAD.size();
 
+    for (size_t i = 0; i < M; ++i)
+    {
+        double Fx = double(i + 1) / M;
+        ch << sortedCAD[i] << "," << Fx << "\n";
+    }
+    ch.close();
 
   // Clean-up
   Simulator::Destroy();
