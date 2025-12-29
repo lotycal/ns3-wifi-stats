@@ -49,9 +49,6 @@
 #include "ns3/wifi-tx-stats-helper.h"
 #include "ns3/timestamp-tag.h"
 #include <iomanip>
-#include "ns3/wifi-static-setup-helper.h"
-#include <fstream>
-#include <algorithm>
 
 
 // Exercise: 1
@@ -630,77 +627,80 @@ int main(int argc, char *argv[])
   std::cout << "- channel width: " << channelWidth << " MHz" << std::endl;
   std::cout << "- guard interval: " << gi << " ns" << std::endl;
 
-  // === Create stations and an AP ===
+  // Create stations and an AP
   NodeContainer wifiStaNodes;
   wifiStaNodes.Create(nWifi);
   NodeContainer wifiApNode;
   wifiApNode.Create(1);
 
-  // === Create PHY and channel ===
+  // Create a default wireless channel and PHY
   YansWifiChannelHelper channel = YansWifiChannelHelper::Default();
   YansWifiPhyHelper phy;
   phy.SetChannel(channel.Create());
 
-  // === General Wi-Fi configuration ===
   Config::SetDefault("ns3::WifiRemoteStationManager::RtsCtsThreshold", UintegerValue(0));
 
-  WifiHelper wifi;
-  wifi.SetStandard(WIFI_STANDARD_80211ax); // <-- HE (High Efficiency, czyli 802.11ax)
-  wifi.SetRemoteStationManager("ns3::IdealWifiManager");
 
+  // Create and configure Wi-Fi network
   WifiMacHelper mac;
-  Ssid ssid = Ssid("ns3-80211ax");
-
-  // === STA (stations) ===
-  mac.SetType("ns3::StaWifiMac",
-              "Ssid", SsidValue(ssid),
-              "ActiveProbing", BooleanValue(false));
-  NetDeviceContainer staDevices = wifi.Install(phy, mac, wifiStaNodes);
-
-  // === AP (access point) ===
-  mac.SetType("ns3::ApWifiMac",
-              "Ssid", SsidValue(ssid));
-  NetDeviceContainer apDevices = wifi.Install(phy, mac, wifiApNode);
-
-  // === STATIC SETUP (802.11ax Block Ack) ===
-  Ptr<WifiNetDevice> apDev = DynamicCast<WifiNetDevice>(apDevices.Get(0));
-  Ptr<WifiNetDevice> staDev = DynamicCast<WifiNetDevice>(staDevices.Get(0));
-
-  NS_ASSERT(apDev != nullptr && staDev != nullptr);
-
-  std::cout << "AP device: " << apDev << ", STA device: " << staDev << std::endl;
-
-  WifiStaticSetupHelper::SetStaticAssociation(apDev, staDevices);
-  WifiStaticSetupHelper::SetStaticBlockAck(apDev, staDevices, {0});
-
-  // === PHY configuration ===
+  WifiHelper wifi;
+  wifi.SetStandard(WIFI_STANDARD_80211a);
+  
+  // Set channel width for given PHY
+  //std::string channelStr("{0, " + std::to_string(channelWidth) + ", BAND_5GHZ, 0}");
+  //phy.Set("ChannelSettings", StringValue(channelStr));
   phy.Set("ChannelSettings", StringValue("{36, 20, BAND_5GHZ, 0}"));
 
-  // === TX stats helper ===
+  //std::ostringstream oss;
+  //oss << "HeMcs" << mcs;
+  //wifi.SetRemoteStationManager("ns3::ConstantRateWifiManager", "DataMode", StringValue(oss.str()),
+  //                             "ControlMode", StringValue(oss.str())); // Set MCS
+
+  wifi.SetRemoteStationManager("ns3::IdealWifiManager");
+  
+  //Ssid ssid = Ssid("ns3-80211ax"); // Set SSID
+
+  mac.SetType("ns3::AdhocWifiMac");
+  //mac.SetType("ns3::StaWifiMac",
+  //            "Ssid", SsidValue(ssid));
+
+  // Create and configure Wi-Fi interfaces
+  NetDeviceContainer staDevice;
+  staDevice = wifi.Install(phy, mac, wifiStaNodes);
+
+  //mac.SetType("ns3::ApWifiMac",
+  //            "Ssid", SsidValue(ssid));
+
+  NetDeviceContainer apDevice;
+  apDevice = wifi.Install(phy, mac, wifiApNode);
+
+  // --- MAC layer statistics helper ---
   WifiTxStatsHelper txStats;
-  txStats.Enable(staDevices);
-  txStats.Enable(apDevices);
+  txStats.Enable(staDevice);
+  txStats.Enable(apDevice);
 
-  // === Guard interval ===
-  Config::Set("/NodeList/*/DeviceList/*/$ns3::WifiNetDevice/HeConfiguration/GuardInterval",
-              TimeValue(NanoSeconds(gi)));
+  // Set guard interval on all interfaces of all nodes
+  Config::Set("/NodeList/*/DeviceList/*/$ns3::WifiNetDevice/HeConfiguration/GuardInterval", TimeValue(NanoSeconds(gi)));
 
-  // === Mobility ===
+  // Configure mobility
   MobilityHelper mobility;
   mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
   mobility.Install(wifiApNode);
   mobility.Install(wifiStaNodes);
 
-  // === IP stack and addressing ===
+  // Install an Internet stack
   InternetStackHelper stack;
   stack.Install(wifiApNode);
   stack.Install(wifiStaNodes);
 
+  // Configure IP addressing
   Ipv4AddressHelper address;
   address.SetBase("192.168.1.0", "255.255.255.0");
+  Ipv4InterfaceContainer staNodeInterface;
+  Ipv4InterfaceContainer apNodeInterface;
 
-  Ipv4InterfaceContainer apInterface = address.Assign(apDevices);
-  Ipv4InterfaceContainer staInterface = address.Assign(staDevices);
+  staNodeInterface = address.Assign(staDevice);
+  apNodeInterface = address.Assign(apDevice);
 
   PopulateARPcache();
 
@@ -1252,49 +1252,6 @@ std::cout << "Total duration (sum over all receivers): "
           << std::fixed << std::setprecision(6)
           << totalDataTransferDuration << " s\n";
 
-// === DELAY CSV + CDF ===
-if (!gDelays.empty())
-{
-    {
-        std::ofstream csv("delays.csv");
-        csv << "delay_s,delay_us\n";
-        csv << std::fixed << std::setprecision(9);
-        for (double d : gDelays)
-        {
-            csv << d << "," << (d * 1e6) << "\n";
-        }
-    }
-
-    std::vector<double> sorted = gDelays;
-    std::sort(sorted.begin(), sorted.end());
-
-    std::ofstream cdf("delays_cdf.csv");
-    cdf << "delay_s,cdf\n";
-    cdf << std::fixed << std::setprecision(9);
-
-    const size_t N = sorted.size();
-    for (size_t i = 0; i < N; ++i)
-    {
-        double Fx = static_cast<double>(i + 1) / static_cast<double>(N);
-        cdf << sorted[i] << "," << Fx << "\n";
-    }
-
-    auto pct = [&](double p){
-        size_t idx = static_cast<size_t>(std::ceil(p * N)) - 1;
-        if (idx >= N) idx = N - 1;
-        return sorted[idx];
-    };
-
-    std::cout << "\n--- Delay percentiles (seconds) ---\n";
-    std::cout << "P50 : " << pct(0.50) << " s\n";
-    std::cout << "P90 : " << pct(0.90) << " s\n";
-    std::cout << "P95 : " << pct(0.95) << " s\n";
-    std::cout << "P99 : " << pct(0.99) << " s\n";
-}
-else
-{
-    std::cout << "\n(No delays collected: gDelays is empty)\n";
-}
 
 
 // ============================================================================
