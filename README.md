@@ -84,7 +84,7 @@ and measurement outcomes easy to interpret.
 ## Repository contents
 
 - Source files for all simulation scenarios (`*.cc`)
-- Final PDF of the associated engineering thesis (`Engineering_Thesis_Daria_Dziunikowska.pdf`)
+- Final PDF of the associated engineering thesis (`Dziunikowska_Analysis_of_Data_Link_Layer_Statistics_in_IEEE_802.11.pdf`)
 - `README.md`
 
 ---
